@@ -16,33 +16,30 @@ appointments_collection = db[COLLECTION_NAME]
 
 def fetch_appointments_for_doctor(doctor_id: str):
     """
-    Fetch upcoming appointments for a specific doctor.
-    Only considers entries containing Doctor_ID to avoid errors.
-    Returns sorted list by date.
+    Fetch upcoming appointments for a given doctor.
+    Handles both ISODate and string-based Appointment_Date.
     """
-    query = {
-        "doctorId": doctor_id,
-        "status": {"$in": ["upcoming", "confirmed"]},
-        "Doctor_ID": {"$exists": True}  # Only entries with Doctor_ID
-    }
-    projection = {
-        "_id": 1,
-        "doctorId": 1,
-        "Doctor_ID": 1,
-        "patientName": 1,
-        "age": 1,
-        "reason": 1,
-        "Doctor_Age": 1,
-        "specialty": 1,
-        "date": 1,
-        "timeSlotId": 1
-    }
 
-    appointments = list(appointments_collection.find(query, projection).sort("date", 1))
+    today = datetime.now()
 
-    # Map specialty to Doctor_Type if needed
+    # Get all appointments for the doctor
+    appointments = list(appointments_collection.find({"Doctor_ID": doctor_id}))
+
+    # Convert Appointment_Date to datetime if needed
     for appt in appointments:
-        if "specialty" in appt:
-            appt["Doctor_Type"] = appt["specialty"]
+        date_val = appt.get("Appointment_Date")
+        if isinstance(date_val, str):
+            try:
+                appt["Appointment_Date"] = parser.parse(date_val)
+            except Exception:
+                continue  # skip if invalid format
 
-    return appointments
+    # Keep only upcoming
+    upcoming = [a for a in appointments if a.get("Appointment_Date") and a["Appointment_Date"] >= today]
+
+    # ✅ Map specialty → Doctor_Type
+    for appt in upcoming:
+        if "Specialty" in appt:
+            appt["Doctor_Type"] = appt.pop("Specialty")
+
+    return upcoming
