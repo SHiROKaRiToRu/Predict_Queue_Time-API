@@ -1,62 +1,64 @@
+# api/api.py
 from fastapi import FastAPI, HTTPException, Query
-import joblib
-import os
 from .db import fetch_appointments_for_doctor
+from joblib import load
+import os
 import numpy as np
 
-app = FastAPI(title="Queue Time Prediction API")
+app = FastAPI()
 
-# ======= Paths for Model & Preprocessing =======
+# Load model and preprocessing objects
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "..", "models", "supervised_model.pkl")
 SCALER_PATH = os.path.join(BASE_DIR, "..", "models", "scaler.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "..", "models", "encoders.pkl")
 
-# ======= Load Model & Preprocessing Objects =======
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH)
-encoders = joblib.load(ENCODERS_PATH)
-feature_cols = ["Doctor_ID", "Doctor_Age", "Doctor_Type", "reason"]
+model = load(MODEL_PATH)
+scaler = load(SCALER_PATH)
+encoders = load(ENCODERS_PATH)
 
-# ======= Predict Queue Time =======
+feature_cols = ["Doctor_ID", "Doctor_Age", "Doctor_Type", "Reason"]
+
 @app.post("/predict_queue_time")
-def predict_queue_time(doctor_id: str = Query(..., description="Doctor_ID for queue")):
-    # Fetch doctor's appointments
-    appointments = fetch_appointments_for_doctor(doctor_id)
-    if not appointments:
-        raise HTTPException(status_code=404, detail="No upcoming appointments found for this doctor.")
+def predict_queue_time(doctor_id: str = Query(..., description="Doctor_ID to predict queue for")):
+    try:
+        appointments = fetch_appointments_for_doctor(doctor_id)
+        if not appointments:
+            raise HTTPException(status_code=404, detail="No upcoming appointments found for this doctor")
 
-    results = []
-    cumulative_time = 0  # To calculate queue-aware serve time
+        queue_predictions = []
+        cumulative_time = 0
 
-    for appt in appointments:
-        # Encode & scale features
-        features = []
-        for col in feature_cols:
-            if col in ["Doctor_ID", "Doctor_Type", "reason"]:
-                le = encoders[col]
-                if appt[col] not in le.classes_:
-                    raise HTTPException(status_code=400, detail=f"Unknown category '{appt[col]}' for column '{col}'")
-                features.append(le.transform([appt[col]])[0])
-            else:
-                features.append(appt[col])
+        for appt in appointments:
+            # Prepare features
+            features = []
+            for col in feature_cols:
+                if col in ["Doctor_ID", "Doctor_Type", "Reason"]:
+                    le = encoders[col]
+                    val = appt.get(col, None)
+                    if val not in le.classes_:
+                        val = le.classes_[0]  # fallback to first category if unknown
+                    features.append(le.transform([val])[0])
+                else:
+                    features.append(appt.get(col, 0))
 
-        # Scale features
-        features_scaled = scaler.transform([features])
+            # Scale features
+            features_scaled = scaler.transform([features])
 
-        # Predict serve time
-        predicted_time = model.predict(features_scaled)[0]
+            # Predict serve time
+            pred_time = model.predict(features_scaled)[0]
+            pred_time = max(0, pred_time)  # ensure non-negative
 
-        # Queue-aware serve time
-        cumulative_time += predicted_time
+            cumulative_time += pred_time
 
-        # Round to nearest minute
-        predicted_minutes = int(np.round(cumulative_time / 60))
+            queue_predictions.append({
+                "booking_id": str(appt["_id"]),
+                "patient_name": appt.get("patientName", ""),
+                "predicted_serve_time_seconds": float(pred_time),
+                "cumulative_wait_time_seconds": float(cumulative_time)
+            })
 
-        results.append({
-            "booking_id": str(appt["_id"]),
-            "patientName": appt["patientName"],
-            "predicted_queue_time_minutes": predicted_minutes
-        })
+        return {"doctor_id": doctor_id, "queue_predictions": queue_predictions}
 
-    return {"doctor_id": doctor_id, "queue_predictions": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
