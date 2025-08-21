@@ -2,8 +2,11 @@
 from pymongo import MongoClient
 import os
 
+MONGO_USER = os.environ["MONGO_USER"]
+MONGO_PASS = os.environ["MONGO_PASS"]
+
 # MongoDB connection from environment variables
-MONGO_URI = f"mongodb+srv://{os.environ['Traventure']}:{os.environ['W2qolroXtlw6qsPS']}@cluster0.4ayta.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGO_URI = f"mongodb+srv://{MONGO_USER}:{MONGO_PASS}@cluster0.4ayta.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = "HealthQ"
 COLLECTION_NAME = "bookings"
 
