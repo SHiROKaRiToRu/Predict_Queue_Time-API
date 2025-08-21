@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 import joblib
 import os
-from db import fetch_appointments_for_doctor
+from .db import fetch_appointments_for_doctor
 import numpy as np
 
 app = FastAPI(title="Queue Time Prediction API")
